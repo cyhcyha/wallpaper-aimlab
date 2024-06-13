@@ -1,0 +1,18 @@
+body {
+    margin: 0;
+    overflow: hidden;
+    background-color: black;
+}
+
+canvas {
+    display: block;
+}
+
+.target {
+    position: absolute;
+    border-radius: 50%;
+    background-color: cyan;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
