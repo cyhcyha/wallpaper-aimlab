@@ -15,6 +15,14 @@ let renderHeight = window.innerHeight; // 渲染区域高度
 let renderAreaTop = 0; // 渲染区域顶部偏移
 let renderAreaRight = 0; // 渲染区域右侧偏移
 let headShotMode = true; // 爆头模式开关
+let isAreaSelectionMode = false; // 区域选择模式
+let spawnArea = {
+  startX: 0,
+  startY: 0,
+  width: 0,
+  height: 0,
+  isDrawing: false,
+};
 
 /**
  * Wallpaper Engine 属性监听器
@@ -95,6 +103,226 @@ scene.add(target);
 let balls = [];
 
 /**
+ * 创建通用按钮样式
+ */
+function createStyledButton(text, top) {
+  const btn = document.createElement("button");
+  btn.style.position = "absolute";
+  btn.style.top = top + "px";
+  btn.style.right = "10px";
+  btn.style.padding = "8px 16px";
+  btn.style.zIndex = "1000";
+  btn.style.cursor = "pointer";
+  btn.style.backgroundColor = "#2c3e50";
+  btn.style.color = "#ffffff";
+  btn.style.border = "none";
+  btn.style.borderRadius = "4px";
+  btn.style.fontFamily = "Arial, sans-serif";
+  btn.style.fontSize = "14px";
+  btn.style.transition = "background-color 0.3s";
+  btn.textContent = text;
+  
+  // 悬停效果
+  btn.addEventListener("mouseover", () => {
+    btn.style.backgroundColor = "#34495e";
+  });
+  btn.addEventListener("mouseout", () => {
+    btn.style.backgroundColor = "#2c3e50";
+  });
+  
+  return btn;
+}
+
+/**
+ * 创建模式切换按钮
+ */
+function createModeToggleBtn() {
+  const modeBtn = createStyledButton("爆头模式", 90);
+  
+  // 设置初始状态
+  modeBtn.textContent = headShotMode ? "切换自由模式" : "切换爆头模式";
+  
+  // 阻止事件冒泡
+  modeBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+  modeBtn.addEventListener("mousemove", (e) => e.stopPropagation());
+  modeBtn.addEventListener("mouseup", (e) => e.stopPropagation());
+  
+  modeBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    headShotMode = !headShotMode;
+    modeBtn.textContent = headShotMode ? "切换自由模式" : "切换爆头模式";
+    
+    // 重新生成所有小球
+    removeAllBalls();
+    initBalls();
+  });
+  
+  document.body.appendChild(modeBtn);
+}
+
+/**
+ * 创建区域选择按钮
+ */
+function createAreaSelectionBtn() {
+  const areaBtn = createStyledButton("选择区域", 50);
+  let selectionState = 'idle';
+  
+  // 阻止事件冒泡
+  areaBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+  areaBtn.addEventListener("mousemove", (e) => e.stopPropagation());
+  areaBtn.addEventListener("mouseup", (e) => e.stopPropagation());
+  
+  areaBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    switch (selectionState) {
+      case 'idle':
+        selectionState = 'selecting';
+        isAreaSelectionMode = true;
+        areaBtn.textContent = "确认区域";
+        handleAreaSelection();
+        break;
+        
+      case 'selecting':
+        if (spawnArea.width > 0 && spawnArea.height > 0) {
+          selectionState = 'selected';
+          isAreaSelectionMode = false;
+          areaBtn.textContent = "清除区域";
+          handleAreaSelection();
+        }
+        break;
+        
+      case 'selected':
+        selectionState = 'idle';
+        isAreaSelectionMode = false;
+        clearSpawnArea();
+        areaBtn.textContent = "选择区域";
+        break;
+    }
+  });
+  
+  document.body.appendChild(areaBtn);
+}
+
+/**
+ * 清除生成区域
+ */
+function clearSpawnArea() {
+  const existingArea = scene.getObjectByName("spawnAreaRect");
+  if (existingArea) {
+    scene.remove(existingArea);
+  }
+  // 重置所有相关状态
+  spawnArea.startX = 0;
+  spawnArea.startY = 0;
+  spawnArea.width = 0;
+  spawnArea.height = 0;
+  spawnArea.isDrawing = false;
+}
+
+/**
+ * 创建区域可视化矩形
+ */
+function createAreaRect(x1, y1, x2, y2) {
+  // 移除现有的区域矩形
+  const existingArea = scene.getObjectByName("spawnAreaRect");
+  if (existingArea) scene.remove(existingArea);
+
+  // 计算矩形的宽度和高度
+  const width = Math.abs(x2 - x1);
+  const height = Math.abs(y2 - y1);
+
+  // 创建矩形边框
+  const geometry = new THREE.BufferGeometry();
+  const vertices = new Float32Array([
+    x1,
+    y1,
+    0,
+    x2,
+    y1,
+    0,
+    x2,
+    y2,
+    0,
+    x1,
+    y2,
+    0,
+    x1,
+    y1,
+    0,
+  ]);
+  geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+
+  const material = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+  const rect = new THREE.Line(geometry, material);
+  rect.name = "spawnAreaRect";
+
+  scene.add(rect);
+
+  // 更新生成区域配置
+  spawnArea.startX = Math.min(x1, x2);
+  spawnArea.startY = Math.min(y1, y2);
+  spawnArea.width = width;
+  spawnArea.height = height;
+}
+
+/**
+ * 获取鼠标在世界坐标中的位置
+ */
+function getMouseWorldPosition(event) {
+  const mouse = new THREE.Vector2();
+  mouse.x = (event.clientX / renderWidth) * 2 - 1;
+  mouse.y = -(event.clientY / renderHeight) * 2 + 1;
+
+  const vector = new THREE.Vector3(mouse.x, mouse.y, 0);
+  vector.unproject(camera);
+  return vector;
+}
+
+/**
+ * 处理区域选择的鼠标事件
+ */
+function handleAreaSelection() {
+  let startPos = { x: 0, y: 0 };
+  
+  function onMouseDown(event) {
+    if (!isAreaSelectionMode) return;
+    const worldPos = getMouseWorldPosition(event);
+    startPos.x = worldPos.x;
+    startPos.y = worldPos.y;
+    spawnArea.isDrawing = true;
+  }
+
+  function onMouseMove(event) {
+    if (!isAreaSelectionMode || !spawnArea.isDrawing) return;
+    const worldPos = getMouseWorldPosition(event);
+    createAreaRect(startPos.x, startPos.y, worldPos.x, worldPos.y);
+  }
+
+  function onMouseUp(event) {
+    if (!isAreaSelectionMode) return;
+    const worldPos = getMouseWorldPosition(event);
+    createAreaRect(startPos.x, startPos.y, worldPos.x, worldPos.y);
+    spawnArea.isDrawing = false;
+  }
+
+  // 移除之前的事件监听器
+  window.removeEventListener("mousedown", onMouseDown);
+  window.removeEventListener("mousemove", onMouseMove);
+  window.removeEventListener("mouseup", onMouseUp);
+
+  // 如果是选择模式，添加新的事件监听器
+  if (isAreaSelectionMode) {
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }
+}
+
+/**
  * 创建随机位置的小球
  * 在爆头模式下，小球只在水平线上生成
  */
@@ -102,20 +330,33 @@ function createRandomBall() {
   const ballGeometry = new THREE.SphereGeometry(BALL_SIZE, 32, 32);
   const ballMaterial = new THREE.MeshPhongMaterial({ color: 0x00ffff });
   const ball = new THREE.Mesh(ballGeometry, ballMaterial);
-
-  const halfFrustumSize = frustumSize / 2;
-  const aspect = renderWidth / renderHeight;
-  const halfFrustumSizeX = halfFrustumSize * aspect;
-
-  // 根据模式设置小球位置
-  if (headShotMode) {
-    ball.position.set((Math.random() - 0.5) * halfFrustumSizeX * 2, 0, 0);
+  console.log("spawnArea: ", spawnArea);
+  // 检查是否存在有效的生成区域
+  if (spawnArea.width > 0 && spawnArea.height > 0) {
+    // 在指定区域内生成
+    if (headShotMode) {
+      const randomX = spawnArea.startX + Math.random() * spawnArea.width;
+      ball.position.set(randomX, 0, 0);
+    } else {
+      const randomX = spawnArea.startX + Math.random() * spawnArea.width;
+      const randomY = spawnArea.startY + Math.random() * spawnArea.height;
+      ball.position.set(randomX, randomY, 0);
+    }
   } else {
-    ball.position.set(
-      (Math.random() - 0.5) * halfFrustumSizeX * 2,
-      (Math.random() - 0.5) * halfFrustumSize * 2,
-      0
-    );
+    // 使用默认生成方式
+    const halfFrustumSize = frustumSize / 2;
+    const aspect = renderWidth / renderHeight;
+    const halfFrustumSizeX = halfFrustumSize * aspect;
+
+    if (headShotMode) {
+      ball.position.set((Math.random() - 0.5) * halfFrustumSizeX * 2, 0, 0);
+    } else {
+      ball.position.set(
+        (Math.random() - 0.5) * halfFrustumSizeX * 2,
+        (Math.random() - 0.5) * halfFrustumSize * 2,
+        0
+      );
+    }
   }
 
   ball.name = "targetBall";
@@ -147,6 +388,13 @@ function removeAllBalls() {
  * 检测点击的小球并重新生成新的小球
  */
 function onMouseClick(event) {
+  // 如果在选择区域模式下，不处理点击事件
+  if (isAreaSelectionMode) return;
+  
+  // 检查点击是否发生在按钮上
+  const target = event.target;
+  if (target.tagName === 'BUTTON') return;
+
   mouse.x = (event.clientX / renderWidth) * 2 - 1;
   mouse.y = -(event.clientY / renderHeight) * 2 + 1;
 
@@ -166,18 +414,22 @@ window.addEventListener("click", onMouseClick);
 
 /**
  * 创建刷新按钮
- * 用于重置场景中的所有小球
  */
 function createRefreshBtn() {
-  const refreshBtn = document.createElement("button");
-  refreshBtn.style.position = "absolute";
-  refreshBtn.style.top = "10px";
-  refreshBtn.style.right = "10px";
-  refreshBtn.textContent = "Refresh";
-  refreshBtn.addEventListener("click", () => {
+  const refreshBtn = createStyledButton("刷新", 10);
+  
+  // 阻止事件冒泡
+  refreshBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+  refreshBtn.addEventListener("mousemove", (e) => e.stopPropagation());
+  refreshBtn.addEventListener("mouseup", (e) => e.stopPropagation());
+  
+  refreshBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     removeAllBalls();
     initBalls();
   });
+  
   document.body.appendChild(refreshBtn);
 }
 
@@ -190,6 +442,14 @@ function animate() {
 }
 
 // 初始化场景
-animate();
-initBalls();
-createRefreshBtn();
+function initScene() {
+  animate();
+  initBalls();
+  createRefreshBtn();
+  createAreaSelectionBtn();
+  createModeToggleBtn(); // 添加模式切换按钮
+  handleAreaSelection();
+}
+
+// 替换原来的初始化调用
+initScene();
